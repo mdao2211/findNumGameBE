@@ -7,7 +7,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
-
+import { RoomService } from 'src/room/room.service';
 @WebSocketGateway(5000, {
   cors: {
     origin: 'http://localhost:5173',
@@ -18,43 +18,66 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly gameService: GameService) {}
+  constructor(private readonly gameService: GameService, private readonly roomService: RoomService) {}
 
   async handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
-    // Gửi trạng thái hiện tại của game cho client khi kết nối
     const state = await this.gameService.getGameState();
     client.emit('game:state', state);
   }
 
   async handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
-    // Nếu cần, bạn có thể xóa người chơi khỏi DB
     this.server.emit('player:leave', client.id);
   }
 
-  @SubscribeMessage('player:join')
-  async handlePlayerJoin(client: Socket, payload: { name: string }) {
-    // Đăng ký người chơi mới thông qua GameService (với PlayerService bên trong)
-    const player = await this.gameService['playerService'].addPlayer(
-      payload.name,
-    );
-    this.server.emit('player:join', player);
-    return player;
+  @SubscribeMessage('joinRoom')
+  async handleJoinRoom(
+    client: Socket,
+    payload: { roomId: string; playerId: string }
+  ) {
+    client.join(payload.roomId);
+    // Lưu record vào bảng RoomPlayer nếu chưa có
+    await this.gameService.joinRoom(payload.roomId, payload.playerId);
+    // Đếm số người trong phòng
+    const count = await this.roomService.getPlayersCount(payload.roomId);
+    const isHost = count === 1; // Người đầu tiên là host
+    // Lấy thông tin người chơi đã tồn tại (không tạo mới)
+    const player = await this.gameService['playerService'].getPlayerById(payload.playerId);
+    // Gắn thuộc tính isHost cho người chơi
+    const playerWithHost = Object.assign({}, player, { isHost });
+    // Phát event cho tất cả client trong room
+    this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
+    return playerWithHost;
   }
 
+@SubscribeMessage('leaveRoom')
+async handleLeaveRoom(
+  client: Socket,
+  payload: { roomId: string; playerId: string }
+) {
+  // Xóa record trong bảng RoomPlayer
+  await this.gameService.leaveRoom(payload.roomId, payload.playerId);
+  // Client rời khỏi room
+  client.leave(payload.roomId);
+  // Phát event cho các client trong room cập nhật số người chơi
+  this.server.to(payload.roomId).emit('room:playerLeft', { playerId: payload.playerId });
+  return { success: true };
+}
+
   @SubscribeMessage('game:start')
-  async handleGameStart() {
+  async handleGameStart(client: Socket, payload: { roomId: string }) {
     try {
       const { number, timeRemaining } = await this.gameService.startGame();
-      this.server.emit('game:number', number);
-      this.server.emit('game:timeUpdate', timeRemaining);
+      // Phát event chỉ tới các client trong room đó
+      this.server.to(payload.roomId).emit('game:number', number);
+      this.server.to(payload.roomId).emit('game:timeUpdate', timeRemaining);
 
       this.gameService.startTimer(
-        (time) => this.server.emit('game:timeUpdate', time),
+        (time) => this.server.to(payload.roomId).emit('game:timeUpdate', time),
         async () => {
           const winner = await this.gameService.endGame();
-          this.server.emit('game:end', winner);
+          this.server.to(payload.roomId).emit('game:end', winner);
         },
       );
     } catch (error) {
@@ -62,27 +85,4 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('player:guess')
-  async handlePlayerGuess(client: Socket, guess: number) {
-    try {
-      const result = await this.gameService.makeGuess(client.id, guess);
-      if (result.correct) {
-        // Nếu đoán đúng, game kết thúc và thông báo người chiến thắng
-        const winner = await this.gameService.endGame();
-        this.server.emit('game:end', winner);
-      } else {
-        client.emit('game:hint', result.message);
-      }
-      // Cập nhật điểm số cho tất cả người chơi
-      const players = (await this.gameService.getGameState()).players;
-      players.forEach((player) => {
-        this.server.emit('game:updateScore', {
-          playerId: player.id,
-          score: player.score,
-        });
-      });
-    } catch (error) {
-      console.error('Error handling guess:', error.message);
-    }
-  }
 }

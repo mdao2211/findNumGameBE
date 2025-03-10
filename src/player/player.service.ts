@@ -27,6 +27,10 @@ export class PlayerService {
     return this.playerRepository.find();
   }
 
+  async getPlayerById(id: string) : Promise<void>{
+    await this.playerRepository.findOne({where: {id}});
+  }
+
   async updateScore(id: string, score: number): Promise<Player> {
     const player = await this.playerRepository.findOne({ where: { id } });
     if (!player) {

@@ -3,15 +3,11 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { PlayerService } from './player/player.service';
-import { PlayerController } from './player/player.controller';
 import { PlayerModule } from './player/player.module';
-import { GameService } from './game/game.service';
 import { GameGateway } from './game/game.gateway';
-import { RoomController } from './room/room.controller';
-import { RoomService } from './room/room.service';
 import { Player } from './player/entities/player.entity';
 import { RoomModule } from './room/room.module';
+import { GameModule } from './game/game.module';
 
 @Module({
   imports: [
@@ -38,8 +34,9 @@ import { RoomModule } from './room/room.module';
     }),
     PlayerModule,
     RoomModule,
+    GameModule,
   ],
   controllers: [AppController],
-  providers: [AppService, GameService, GameGateway],
+  providers: [AppService, GameGateway],
 })
 export class AppModule {}

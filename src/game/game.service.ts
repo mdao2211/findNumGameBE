@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PlayerService } from 'src/player/player.service';
 import { Player } from 'src/player/entities/player.entity';
+import { InjectRepository } from '@nestjs/typeorm';
+import { RoomPlayer } from './entities/roomPlayer.entity';
+import { Repository } from 'typeorm';
+import { RoomResponseDto } from 'src/room/dto/room-response-dto';
 
 @Injectable()
 export class GameService {
@@ -9,8 +13,13 @@ export class GameService {
   private gameTimer: NodeJS.Timeout | null = null;
   private timeRemaining = 180; // 180 seconds = 3 minutes
 
-  constructor(private readonly playerService: PlayerService) {}
+  constructor(
+    private readonly playerService: PlayerService,
+    @InjectRepository(RoomPlayer)
+    private roomPlayerRepository: Repository<RoomPlayer>,
+  ) {}
 
+  
   async startGame() {
     const players = await this.playerService.getPlayers();
     if (players.length < 2) {
@@ -29,33 +38,32 @@ export class GameService {
       timeRemaining: this.timeRemaining,
     };
   }
-
-  async makeGuess(
-    playerId: string,
-    guess: number,
-  ): Promise<{ correct: boolean; message: string; scoreAwarded?: number }> {
-    const players = await this.playerService.getPlayers();
-    const player = players.find((p) => p.id === playerId);
-    if (!player) throw new Error('Player not found');
-    if (this.currentNumber === null) throw new Error('Game not started');
-
-    if (guess === this.currentNumber) {
-      // Nếu đoán đúng, tính điểm dựa trên thời gian còn lại.
-      // Ví dụ: điểm = thời gian còn lại (max 180)
-      const pointsAwarded = this.timeRemaining;
-      const newScore = player.score + pointsAwarded;
-      await this.playerService.updateScore(playerId, newScore);
-      return {
-        correct: true,
-        message: 'Correct number!',
-        scoreAwarded: pointsAwarded,
-      };
-    } else {
-      return {
-        correct: false,
-        message: guess > this.currentNumber ? 'Too high!' : 'Too low!',
-      };
+  
+  async joinRoom(roomId: string, playerId: string): Promise<void> {
+    try {
+      const exists = await this.roomPlayerRepository.findOne({
+        where: { roomId, playerId },
+      });
+      if (!exists) {
+        const roomPlayer = this.roomPlayerRepository.create({
+          roomId,
+          playerId,
+          isReady: false,
+        });
+        await this.roomPlayerRepository.save(roomPlayer);
+      }
+    } catch (error: any) {
+      // Nếu lỗi duplicate, bỏ qua
+      if (error.code === '23505') {
+        // Duplicate entry, không cần làm gì
+        return;
+      }
+      throw error;
     }
+  }
+  
+  async leaveRoom(roomId: string, playerId: string): Promise<void> {
+    await this.roomPlayerRepository.delete({roomId, playerId});
   }
 
   startTimer(callback: (time: number) => void, endCallback: () => void) {

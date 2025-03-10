@@ -13,10 +13,14 @@ export class RoomResponseDto {
   @ApiProperty()
   status: string;
 
-  constructor(room: Room) {
+  @ApiProperty()
+  playersCount: number;
+
+  constructor(room: Room, playersCount: number) {
     this.id = room.id;
     this.name = room.name;
     this.createdAt = room.createdAt;
     this.status = room.status;
+    this.playersCount = playersCount
   }
 }
