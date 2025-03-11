@@ -37,18 +37,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     payload: { roomId: string; playerId: string }
   ) {
     client.join(payload.roomId);
-    // Lưu record vào bảng RoomPlayer nếu chưa có
     await this.gameService.joinRoom(payload.roomId, payload.playerId);
-    // Đếm số người trong phòng
     const count = await this.roomService.getPlayersCount(payload.roomId);
-    const isHost = count === 1; // Người đầu tiên là host
-    // Lấy thông tin người chơi đã tồn tại (không tạo mới)
+    const isHost = count === 1; 
     const player = await this.gameService['playerService'].getPlayerById(payload.playerId);
-    // Gắn thuộc tính isHost cho người chơi
     const playerWithHost = Object.assign({}, player, { isHost });
-    // Phát event cho tất cả client trong room
+    // console.log("Backend - playerWithHost:", playerWithHost);
     this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
-    return playerWithHost;
+    return { success: true, player: playerWithHost };
   }
 
 @SubscribeMessage('leaveRoom')
@@ -82,6 +78,22 @@ async handleLeaveRoom(
       );
     } catch (error) {
       console.error('Error starting game:', error.message);
+    }
+  }
+
+  @SubscribeMessage('player:correctGuess')
+  async handleCorrectGuess(
+    client: Socket,
+    payload: { roomId: string; playerId: string; points: number }
+  ) {
+    try {
+      const updatedPlayer = await this.gameService['playerService'].updateScore(payload.playerId, payload.points);
+      // Phát event cập nhật điểm tới các client trong room
+      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+      return { success: true, player: updatedPlayer };
+    } catch (error) {
+      console.error("Error updating score:", error);
+      return { success: false, error: error.message };
     }
   }
 

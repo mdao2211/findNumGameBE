@@ -36,7 +36,8 @@ export class PlayerService {
     if (!player) {
       throw new Error('Player not found');
     }
-    player.score = score;
+    player.score = player.score + score;
+    console.log(player.score);
     return this.playerRepository.save(player);
   }
 
