@@ -36,7 +36,7 @@ export class RoomService {
     return roomsWithCount;
   }
 
-  async createRoom(name?: string): Promise<RoomResponseDto> {
+  async createRoom(name: string): Promise<RoomResponseDto> {
     const room = this.roomRepository.create({
       name,
       status: 'waiting',

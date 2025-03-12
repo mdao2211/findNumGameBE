@@ -23,6 +23,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  // Map lưu host của mỗi phòng: key là roomId, value là playerId của host
+  private roomHosts: Map<string, string> = new Map();
+
   constructor(
     private readonly gameService: GameService,
     private readonly roomService: RoomService,
@@ -36,48 +39,83 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
+    // Kiểm tra và tái chỉ định host nếu cần
+    this.roomHosts.forEach(async (hostId, roomId) => {
+      if (hostId === client.id) {
+        const clients = await this.server.in(roomId).fetchSockets();
+        if (clients.length > 0) {
+          const newHostId = clients[0].id;
+          this.roomHosts.set(roomId, newHostId);
+          this.server.to(roomId).emit('room:hostChanged', { hostId: newHostId });
+        } else {
+          this.roomHosts.delete(roomId);
+        }
+      }
+    });
     this.server.emit('player:leave', client.id);
   }
 
   @SubscribeMessage('joinRoom')
-  async handleJoinRoom(
-    client: Socket,
-    payload: { roomId: string; playerId: string },
-  ) {
-    client.join(payload.roomId);
-    await this.gameService.joinRoom(payload.roomId, payload.playerId);
-    const count = await this.roomService.getPlayersCount(payload.roomId);
-    const isHost = count === 1;
-    const player = await this.gameService['playerService'].getPlayerById(
-      payload.playerId,
-    );
-    const playerWithHost = Object.assign({}, player, { isHost });
-    // console.log("Backend - playerWithHost:", playerWithHost);
-    this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
-    return { success: true, player: playerWithHost };
+async handleJoinRoom(
+  client: Socket,
+  payload: { roomId: string; playerId: string },
+) {
+  client.join(payload.roomId);
+  await this.gameService.joinRoom(payload.roomId, payload.playerId);
+
+  // Nếu phòng chưa có host, gán người chơi hiện tại làm host.
+  let isHost = false;
+  if (!this.roomHosts.has(payload.roomId)) {
+    this.roomHosts.set(payload.roomId, payload.playerId);
+    isHost = true;
+  } else if (this.roomHosts.get(payload.roomId) === payload.playerId) {
+    // Nếu người chơi đã là host (trường hợp reload) thì vẫn giữ role host.
+    isHost = true;
   }
+
+  const player = await this.gameService['playerService'].getPlayerById(
+    payload.playerId,
+  );
+  const playerWithHost = { ...player, isHost };
+  this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
+  return { success: true, player: playerWithHost };
+}
+
 
   @SubscribeMessage('leaveRoom')
   async handleLeaveRoom(
     client: Socket,
     payload: { roomId: string; playerId: string },
   ) {
-    // Xóa record trong bảng RoomPlayer
     await this.gameService.leaveRoom(payload.roomId, payload.playerId);
-    // Client rời khỏi room
     client.leave(payload.roomId);
-    // Phát event cho các client trong room cập nhật số người chơi
-    this.server
-      .to(payload.roomId)
-      .emit('room:playerLeft', { playerId: payload.playerId });
+    // Nếu người rời phòng là host, tái chỉ định host
+    if (this.roomHosts.get(payload.roomId) === payload.playerId) {
+      const clients = await this.server.in(payload.roomId).fetchSockets();
+      if (clients.length > 0) {
+        const newHost = clients[0].id;
+        this.roomHosts.set(payload.roomId, newHost);
+        this.server.to(payload.roomId).emit('room:hostChanged', { hostId: newHost });
+      } else {
+        this.roomHosts.delete(payload.roomId);
+      }
+    }
+    this.server.to(payload.roomId).emit('room:playerLeft', { playerId: payload.playerId });
     return { success: true };
   }
 
   @SubscribeMessage('game:start')
-  async handleGameStart(client: Socket, payload: { roomId: string }) {
+  async handleGameStart(
+    client: Socket,
+    payload: { roomId: string; playerId: string },
+  ) {
+    // Kiểm tra người gửi event có phải host của phòng không
+    if (this.roomHosts.get(payload.roomId) !== payload.playerId) {
+      return { success: false, error: "Only the host can start the game." };
+    }
     try {
       const { number, timeRemaining } = await this.gameService.startGame();
-      // Phát event chỉ tới các client trong room đó
+      // Phát sự kiện đến tất cả client trong phòng
       this.server.to(payload.roomId).emit('game:number', number);
       this.server.to(payload.roomId).emit('game:timeUpdate', timeRemaining);
 
@@ -88,8 +126,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.server.to(payload.roomId).emit('game:end', winner);
         },
       );
+      return { success: true };
     } catch (error) {
       console.error('Error starting game:', error.message);
+      return { success: false, error: error.message };
     }
   }
 
@@ -120,7 +160,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.playerId,
         payload.points,
       );
-      // Phát event cập nhật điểm tới các client trong room
       this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
       return { success: true, player: updatedPlayer };
     } catch (error) {
@@ -139,7 +178,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.playerId,
         payload.points,
       );
-      // Phát sự kiện cập nhật điểm đến tất cả client trong room
       this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
       return { success: true, player: updatedPlayer };
     } catch (error: any) {
@@ -154,8 +192,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     payload: { roomId: string; playerId: string; finalScore: number },
   ) {
     try {
-      // Có thể thực hiện thao tác bổ sung nếu cần, ví dụ: ghi nhận kết thúc game cho người chơi.
-      // Sau đó, phát event score:updated để thông báo final score
       const updatedPlayer = await this.gameService['playerService'].updateScore(
         payload.playerId,
         0,
