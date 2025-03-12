@@ -1,16 +1,18 @@
+// Đặt đoạn mã này lên đầu file, trước mọi import khác
+import { webcrypto } from 'crypto';
+
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto as unknown as Crypto;
+}
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { webcrypto } from 'crypto';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
-
-  if (!globalThis.crypto) {
-    globalThis.crypto = webcrypto as unknown as Crypto;
-  }
 
   app.enableCors({
     origin: 'http://localhost:5173',
