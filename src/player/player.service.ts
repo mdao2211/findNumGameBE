@@ -27,8 +27,15 @@ export class PlayerService {
     return this.playerRepository.find();
   }
 
-  async getPlayerById(id: string) : Promise<void>{
-    await this.playerRepository.findOne({where: {id}});
+  async getPlayerById(id: string): Promise<void> {
+    await this.playerRepository.findOne({ where: { id } });
+  }
+
+  async resetScore(id: string): Promise<Player> {
+    const player = await this.playerRepository.findOne({ where: { id } });
+    if (!player) throw new Error('Player not found');
+    player.score = 0;
+    return this.playerRepository.save(player);
   }
 
   async updateScore(id: string, score: number): Promise<Player> {
@@ -36,7 +43,7 @@ export class PlayerService {
     if (!player) {
       throw new Error('Player not found');
     }
-    player.score = player.score + score;
+    player.score = (player.score || 0) + score;
     console.log(player.score);
     return this.playerRepository.save(player);
   }
