@@ -8,7 +8,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { RoomService } from 'src/room/room.service';
-@WebSocketGateway(5000, {
+@WebSocketGateway({
   cors: {
     origin: 'http://localhost:5173',
     credentials: true,
