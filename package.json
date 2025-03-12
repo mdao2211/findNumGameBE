@@ -28,12 +28,14 @@
     "@nestjs/swagger": "^11.0.6",
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.0.11",
+    "aws-serverless-express": "^3.4.0",
     "class-validator": "^0.14.1",
     "mysql2": "^3.13.0",
     "pg": "^8.13.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.21"
+    "typeorm": "^0.3.21",
+    "vercel": "^41.4.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
