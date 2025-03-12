@@ -19,7 +19,6 @@ export class GameService {
     private roomPlayerRepository: Repository<RoomPlayer>,
   ) {}
 
-  
   async startGame() {
     const players = await this.playerService.getPlayers();
     if (players.length < 2) {
@@ -38,32 +37,43 @@ export class GameService {
       timeRemaining: this.timeRemaining,
     };
   }
-  
+
   async joinRoom(roomId: string, playerId: string): Promise<void> {
     try {
-      const exists = await this.roomPlayerRepository.findOne({
+      // Tìm row của player trong room
+      let roomPlayer = await this.roomPlayerRepository.findOne({
         where: { roomId, playerId },
       });
-      if (!exists) {
-        const roomPlayer = this.roomPlayerRepository.create({
+
+      // Kiểm tra xem trong phòng đã có host chưa
+      const hostExists = await this.roomPlayerRepository.findOne({
+        where: { roomId, isHost: true },
+      });
+
+      if (!roomPlayer) {
+        // Nếu chưa có row, tạo mới với isHost = true nếu chưa có host
+        roomPlayer = this.roomPlayerRepository.create({
           roomId,
           playerId,
           isReady: false,
+          isHost: hostExists ? false : true,
         });
         await this.roomPlayerRepository.save(roomPlayer);
+      } else {
+        // Nếu row đã tồn tại và chưa có host nào, cập nhật isHost = true cho row này
+        if (!hostExists) {
+          roomPlayer.isHost = true;
+          await this.roomPlayerRepository.save(roomPlayer);
+        }
       }
     } catch (error: any) {
-      // Nếu lỗi duplicate, bỏ qua
-      if (error.code === '23505') {
-        // Duplicate entry, không cần làm gì
-        return;
-      }
+      if (error.code === '23505') return;
       throw error;
     }
   }
-  
+
   async leaveRoom(roomId: string, playerId: string): Promise<void> {
-    await this.roomPlayerRepository.delete({roomId, playerId});
+    await this.roomPlayerRepository.delete({ roomId, playerId });
   }
 
   startTimer(callback: (time: number) => void, endCallback: () => void) {

@@ -1,4 +1,3 @@
-// src/player/player.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Player } from './entities/player.entity';
@@ -11,7 +10,7 @@ export class PlayerService {
     private playerRepository: Repository<Player>,
   ) {}
 
-  async addPlayer(name: string): Promise<Player> {
+  async addPlayer(name?: string): Promise<Player> {
     const player = this.playerRepository.create({
       name,
       score: 0,
@@ -30,20 +29,26 @@ export class PlayerService {
 
   async getPlayerById(id: string): Promise<Player> {
     const player = await this.playerRepository.findOne({ where: { id } });
-    if (!player) throw new Error("Player not found");
+    if (!player) {
+      throw new Error('Player not found');
+    }
     return player;
   }
 
   async resetScore(id: string): Promise<Player> {
-    const player = await this.getPlayerById(id);
+    const player = await this.playerRepository.findOne({ where: { id } });
+    if (!player) throw new Error('Player not found');
     player.score = 0;
     return this.playerRepository.save(player);
   }
 
-  async updateScore(id: string, scoreDelta: number): Promise<Player> {
-    const player = await this.getPlayerById(id);
-    player.score = (player.score || 0) + scoreDelta;
-    // console.log("New score:", player.score);
+  async updateScore(id: string, score: number): Promise<Player> {
+    const player = await this.playerRepository.findOne({ where: { id } });
+    if (!player) {
+      throw new Error('Player not found');
+    }
+    player.score = (player.score || 0) + score;
+    console.log(player.score);
     return this.playerRepository.save(player);
   }
 

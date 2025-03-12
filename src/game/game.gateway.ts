@@ -11,7 +11,10 @@ import { RoomService } from 'src/room/room.service';
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['https://findnumgamefe-production.up.railway.app', 'http://localhost:5173'];
+  : [
+      'https://findnumgamefe-production.up.railway.app',
+      'http://localhost:5173',
+    ];
 
 @WebSocketGateway({
   cors: {
@@ -22,9 +25,6 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
-
-  // Map lưu host của mỗi phòng: key là roomId, value là playerId của host
-  private roomHosts: Map<string, string> = new Map();
 
   constructor(
     private readonly gameService: GameService,
@@ -39,68 +39,69 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
-    // Kiểm tra và tái chỉ định host nếu cần
-    this.roomHosts.forEach(async (hostId, roomId) => {
-      if (hostId === client.id) {
-        const clients = await this.server.in(roomId).fetchSockets();
-        if (clients.length > 0) {
-          const newHostId = clients[0].id;
-          this.roomHosts.set(roomId, newHostId);
-          this.server.to(roomId).emit('room:hostChanged', { hostId: newHostId });
-        } else {
-          this.roomHosts.delete(roomId);
-        }
-      }
-    });
+    // Khi disconnect, ta không xử lý chuyển giao host tại đây vì việc chuyển giao sẽ được thực hiện
+    // khi client gửi sự kiện 'leaveRoom'
     this.server.emit('player:leave', client.id);
   }
 
   @SubscribeMessage('joinRoom')
-async handleJoinRoom(
-  client: Socket,
-  payload: { roomId: string; playerId: string },
-) {
-  client.join(payload.roomId);
-  await this.gameService.joinRoom(payload.roomId, payload.playerId);
+  async handleJoinRoom(
+    client: Socket,
+    payload: { roomId: string; playerId: string },
+  ) {
+    client.join(payload.roomId);
+    await this.gameService.joinRoom(payload.roomId, payload.playerId);
 
-  // Nếu phòng chưa có host, gán người chơi hiện tại làm host.
-  let isHost = false;
-  if (!this.roomHosts.has(payload.roomId)) {
-    this.roomHosts.set(payload.roomId, payload.playerId);
-    isHost = true;
-  } else if (this.roomHosts.get(payload.roomId) === payload.playerId) {
-    // Nếu người chơi đã là host (trường hợp reload) thì vẫn giữ role host.
-    isHost = true;
+    // Lấy bản ghi RoomPlayer từ DB để xác định isHost
+    const roomPlayer = await this.gameService['roomPlayerRepository'].findOne({
+      where: { roomId: payload.roomId, playerId: payload.playerId },
+    });
+    const isHost = roomPlayer?.isHost ?? false;
+
+    const player = await this.gameService['playerService'].getPlayerById(
+      payload.playerId,
+    );
+    const playerWithHost = { ...player, isHost };
+    this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
+    return { success: true, player: playerWithHost };
   }
-
-  const player = await this.gameService['playerService'].getPlayerById(
-    payload.playerId,
-  );
-  const playerWithHost = { ...player, isHost };
-  this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
-  return { success: true, player: playerWithHost };
-}
-
 
   @SubscribeMessage('leaveRoom')
   async handleLeaveRoom(
     client: Socket,
     payload: { roomId: string; playerId: string },
   ) {
+    // Lấy thông tin RoomPlayer của người chơi trước khi xóa để kiểm tra nếu họ là host
+    const roomPlayer = await this.gameService['roomPlayerRepository'].findOne({
+      where: { roomId: payload.roomId, playerId: payload.playerId },
+    });
+
     await this.gameService.leaveRoom(payload.roomId, payload.playerId);
     client.leave(payload.roomId);
-    // Nếu người rời phòng là host, tái chỉ định host
-    if (this.roomHosts.get(payload.roomId) === payload.playerId) {
-      const clients = await this.server.in(payload.roomId).fetchSockets();
-      if (clients.length > 0) {
-        const newHost = clients[0].id;
-        this.roomHosts.set(payload.roomId, newHost);
-        this.server.to(payload.roomId).emit('room:hostChanged', { hostId: newHost });
-      } else {
-        this.roomHosts.delete(payload.roomId);
+
+    if (roomPlayer && roomPlayer.isHost) {
+      // Nếu host rời, tìm các bản ghi RoomPlayer khác trong phòng (theo thời gian tham gia tăng dần)
+      const otherRoomPlayers = await this.gameService[
+        'roomPlayerRepository'
+      ].find({
+        where: { roomId: payload.roomId },
+        order: { joinAt: 'ASC' },
+      });
+      if (otherRoomPlayers.length > 0) {
+        // Chuyển quyền host cho bản ghi đầu tiên
+        const newHostPlayer = otherRoomPlayers[0];
+        await this.gameService['roomPlayerRepository'].update(
+          { id: newHostPlayer.id },
+          { isHost: true },
+        );
+        this.server
+          .to(payload.roomId)
+          .emit('room:hostChanged', { hostId: newHostPlayer.playerId });
       }
     }
-    this.server.to(payload.roomId).emit('room:playerLeft', { playerId: payload.playerId });
+    this.server
+      .to(payload.roomId)
+      .emit('room:playerLeft', { playerId: payload.playerId });
     return { success: true };
   }
 
@@ -109,13 +110,15 @@ async handleJoinRoom(
     client: Socket,
     payload: { roomId: string; playerId: string },
   ) {
-    // Kiểm tra người gửi event có phải host của phòng không
-    if (this.roomHosts.get(payload.roomId) !== payload.playerId) {
-      return { success: false, error: "Only the host can start the game." };
+    // Kiểm tra quyền dựa trên DB: chỉ cho phép người có isHost = true bắt đầu game
+    const roomPlayer = await this.gameService['roomPlayerRepository'].findOne({
+      where: { roomId: payload.roomId, playerId: payload.playerId },
+    });
+    if (!roomPlayer || !roomPlayer.isHost) {
+      return { success: false, error: 'Only the host can start the game.' };
     }
     try {
       const { number, timeRemaining } = await this.gameService.startGame();
-      // Phát sự kiện đến tất cả client trong phòng
       this.server.to(payload.roomId).emit('game:number', number);
       this.server.to(payload.roomId).emit('game:timeUpdate', timeRemaining);
 
