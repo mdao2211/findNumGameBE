@@ -8,9 +8,14 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { RoomService } from 'src/room/room.service';
+
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['https://findnumgamefe-production.up.railway.app', 'http://localhost:5173'];
+
 @WebSocketGateway({
   cors: {
-    origin: 'http://localhost:5173',
+    origin: allowedOrigins,
     credentials: true,
   },
 })
