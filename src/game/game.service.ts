@@ -40,34 +40,38 @@ export class GameService {
 
   async joinRoom(roomId: string, playerId: string): Promise<void> {
     try {
-      // Tìm row của player trong room
-      let roomPlayer = await this.roomPlayerRepository.findOne({
+      // First check if there are any players in the room
+      const existingPlayers = await this.roomPlayerRepository.find({
+        where: { roomId },
+      });
+
+      // Determine if this should be the host (first player in the room)
+      const shouldBeHost = existingPlayers.length === 0;
+
+      // Check if this player is already in the room
+      const existingPlayer = await this.roomPlayerRepository.findOne({
         where: { roomId, playerId },
       });
 
-      // Kiểm tra xem trong phòng đã có host chưa
-      const hostExists = await this.roomPlayerRepository.findOne({
-        where: { roomId, isHost: true },
-      });
-
-      if (!roomPlayer) {
-        // Nếu chưa có row, tạo mới với isHost = true nếu chưa có host
-        roomPlayer = this.roomPlayerRepository.create({
+      if (!existingPlayer) {
+        // Create new room player entry
+        const newRoomPlayer = this.roomPlayerRepository.create({
           roomId,
           playerId,
           isReady: false,
-          isHost: hostExists ? false : true,
+          isHost: shouldBeHost, // Set host status based on if they're first
         });
-        await this.roomPlayerRepository.save(roomPlayer);
+        await this.roomPlayerRepository.save(newRoomPlayer);
       } else {
-        // Nếu row đã tồn tại và chưa có host nào, cập nhật isHost = true cho row này
-        if (!hostExists) {
-          roomPlayer.isHost = true;
-          await this.roomPlayerRepository.save(roomPlayer);
+        // If player already exists but room has no host, make them host
+        if (!existingPlayers.some((player) => player.isHost)) {
+          existingPlayer.isHost = true;
+          await this.roomPlayerRepository.save(existingPlayer);
         }
       }
-    } catch (error: any) {
-      if (error.code === '23505') return;
+    } catch (error) {
+      // Only ignore unique constraint violations
+      if (error?.code === '23505') return;
       throw error;
     }
   }
