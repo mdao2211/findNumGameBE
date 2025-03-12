@@ -21,13 +21,16 @@ import { GameModule } from './game/game.module';
         type: 'postgres',
         host: configService.get('DB_HOST'),
         port: +(configService.get<number>('DB_PORT') ?? 5432),
-        username: configService.get<string>('DB_USER'),
+        username: configService.get<string>('DB_USERNAME'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
         entities: [
           __dirname + '/**/*.entity{.ts,.js}',
           __dirname + '/**/*.entities{.ts,.js}',
         ],
+        ssl: {
+          rejectUnauthorized: false,
+        }
         // synchronize: true,
       }),
       inject: [ConfigService],
