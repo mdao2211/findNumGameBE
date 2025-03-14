@@ -32,13 +32,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   async handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    // console.log(`Client connected: ${client.id}`);
     const state = await this.gameService.getGameState();
     client.emit('game:state', state);
   }
 
   async handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
+    // console.log(`Client disconnected: ${client.id}`);
     this.server.emit('player:leave', client.id);
   }
 
@@ -180,22 +180,35 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('player:correctGuess')
-  async handleCorrectGuess(
-    client: Socket,
-    payload: { roomId: string; playerId: string; points: number },
-  ) {
-    try {
-      const updatedPlayer = await this.gameService['playerService'].updateScore(
-        payload.playerId,
-        payload.points,
-      );
-      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
-      return { success: true, player: updatedPlayer };
-    } catch (error) {
-      console.error('Error updating score:', error);
-      return { success: false, error: error.message };
+async handleCorrectGuess(
+  client: Socket,
+  payload: { roomId: string; playerId: string; points: number },
+) {
+  try {
+    // Cập nhật điểm cho người chơi
+    const updatedPlayer = await this.gameService['playerService'].updateScore(
+      payload.playerId,
+      payload.points,
+    );
+    // Emit event cập nhật điểm cho toàn bộ room
+    this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+
+    // Tạo target number mới (trong khoảng 1-100)
+    const newTargetNumber = Math.floor(Math.random() * 100) + 1;
+    // Lấy trạng thái game của room
+    const roomGameState = this.gameService.getRoomGameState(payload.roomId);
+    if (roomGameState) {
+      roomGameState.currentNumber = newTargetNumber;
     }
+    // Emit event cập nhật target number mới cho toàn bộ room
+    this.server.to(payload.roomId).emit('game:targetUpdate', newTargetNumber);
+
+    return { success: true, player: updatedPlayer };
+  } catch (error) {
+    console.error('Error updating score:', error);
+    return { success: false, error: error.message };
   }
+}
 
   @SubscribeMessage('player:wrongGuess')
   async handleWrongGuess(
