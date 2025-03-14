@@ -1,107 +1,91 @@
+// src/game.service.ts
 import { Injectable } from '@nestjs/common';
 import { PlayerService } from 'src/player/player.service';
 import { Player } from 'src/player/entities/player.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { RoomPlayer } from './entities/roomPlayer.entity';
 import { Repository } from 'typeorm';
-import { RoomResponseDto } from 'src/room/dto/room-response-dto';
+
+interface RoomGameState {
+  currentNumber: number | null;
+  isGameStarted: boolean;
+  timeRemaining: number;
+  gameTimer: NodeJS.Timeout | null;
+}
 
 @Injectable()
 export class GameService {
-  private currentNumber: number | null = null;
-  private isGameStarted = false;
-  private gameTimer: NodeJS.Timeout | null = null;
-  private timeRemaining = 180; // 180 seconds = 3 minutes
+  // Lưu trạng thái game theo roomId
+  private games: Map<string, RoomGameState> = new Map();
 
   constructor(
     private readonly playerService: PlayerService,
     @InjectRepository(RoomPlayer)
-    private roomPlayerRepository: Repository<RoomPlayer>,
+    public roomPlayerRepository: Repository<RoomPlayer>,
   ) {}
 
-  async startGame() {
-    const players = await this.playerService.getPlayers();
-    if (players.length < 2) {
+  async startGame(
+    roomId: string,
+  ): Promise<{ number: number; timeRemaining: number }> {
+    // Kiểm tra số lượng người trong room
+    const playersInRoom = await this.roomPlayerRepository.find({
+      where: { roomId },
+    });
+    if (playersInRoom.length < 2) {
       throw new Error('Not enough players');
     }
-    this.isGameStarted = true;
     // Sinh số ngẫu nhiên từ 1 đến 1000
-    this.currentNumber = Math.floor(Math.random() * 1000) + 1;
-    this.timeRemaining = 180;
-
-    if (this.gameTimer) {
-      clearInterval(this.gameTimer);
-    }
-    return {
-      number: this.currentNumber,
-      timeRemaining: this.timeRemaining,
+    const number = Math.floor(Math.random() * 1000) + 1;
+    const timeRemaining = 180;
+    // Lưu trạng thái game cho room
+    const gameState: RoomGameState = {
+      currentNumber: number,
+      isGameStarted: true,
+      timeRemaining,
+      gameTimer: null,
     };
-  }
+    this.games.set(roomId, gameState);
 
-  async joinRoom(roomId: string, playerId: string): Promise<void> {
-    try {
-      // First check if there are any players in the room
-      const existingPlayers = await this.roomPlayerRepository.find({
-        where: { roomId },
-      });
+    console.log(`Game started in room ${roomId} with target number: ${number}`);
 
-      // Determine if this should be the host (first player in the room)
-      const shouldBeHost = existingPlayers.length === 0;
-
-      // Check if this player is already in the room
-      const existingPlayer = await this.roomPlayerRepository.findOne({
-        where: { roomId, playerId },
-      });
-
-      if (!existingPlayer) {
-        // Create new room player entry
-        const newRoomPlayer = this.roomPlayerRepository.create({
-          roomId,
-          playerId,
-          isReady: false,
-          isHost: shouldBeHost, // Set host status based on if they're first
-        });
-        await this.roomPlayerRepository.save(newRoomPlayer);
-      } else {
-        // If player already exists but room has no host, make them host
-        if (!existingPlayers.some((player) => player.isHost)) {
-          existingPlayer.isHost = true;
-          await this.roomPlayerRepository.save(existingPlayer);
-        }
-      }
-    } catch (error) {
-      // Only ignore unique constraint violations
-      if (error?.code === '23505') return;
-      throw error;
+    // Nếu có timer trước đó, xoá nó
+    if (gameState.gameTimer) {
+      clearInterval(gameState.gameTimer);
     }
+    return { number, timeRemaining };
   }
 
-  async leaveRoom(roomId: string, playerId: string): Promise<void> {
-    await this.roomPlayerRepository.delete({ roomId, playerId });
-  }
-
-  startTimer(callback: (time: number) => void, endCallback: () => void) {
-    if (this.gameTimer) {
-      clearInterval(this.gameTimer);
+  // Phương thức khởi chạy timer cho room
+  startTimer(
+    roomId: string,
+    callback: (time: number) => void,
+    endCallback: () => void,
+  ) {
+    const gameState = this.games.get(roomId);
+    if (!gameState) return;
+    if (gameState.gameTimer) {
+      clearInterval(gameState.gameTimer);
     }
-    this.gameTimer = setInterval(() => {
-      this.timeRemaining--;
-      callback(this.timeRemaining);
-      if (this.timeRemaining <= 0) {
-        this.endGame().then(() => endCallback());
+    gameState.gameTimer = setInterval(() => {
+      gameState.timeRemaining--;
+      callback(gameState.timeRemaining);
+      if (gameState.timeRemaining <= 0) {
+        this.endGame(roomId).then(() => endCallback());
       }
     }, 1000);
   }
 
-  async endGame() {
-    if (this.gameTimer) {
-      clearInterval(this.gameTimer);
-      this.gameTimer = null;
+  async endGame(roomId: string) {
+    const gameState = this.games.get(roomId);
+    if (gameState && gameState.gameTimer) {
+      clearInterval(gameState.gameTimer);
+      gameState.gameTimer = null;
     }
-    this.isGameStarted = false;
-    this.currentNumber = null;
-
-    // Tìm người chiến thắng (người có điểm cao nhất)
+    if (gameState) {
+      gameState.isGameStarted = false;
+      gameState.currentNumber = null;
+    }
+    // Tìm người chiến thắng (đơn giản dựa vào player score)
     const players = await this.playerService.getPlayers();
     let winner: Player | null = null;
     let highestScore = -1;
@@ -111,15 +95,61 @@ export class GameService {
         winner = player;
       }
     }
+    // Xoá trạng thái game của room sau khi kết thúc
+    this.games.delete(roomId);
     return winner;
+  }
+
+  // Lấy trạng thái game của room (nếu có)
+  getRoomGameState(roomId: string) {
+    return this.games.get(roomId);
+  }
+
+  async joinRoom(
+    roomId: string,
+    playerId: string,
+    isHostFlag?: boolean,
+  ): Promise<void> {
+    try {
+      let existingPlayer = await this.roomPlayerRepository.findOne({
+        where: { roomId, playerId },
+      });
+      if (existingPlayer) {
+        // Nếu đã tồn tại, nếu payload báo là host và record hiện tại không phải host, cập nhật lại
+        if (isHostFlag && !existingPlayer.isHost) {
+          existingPlayer.isHost = true;
+          await this.roomPlayerRepository.save(existingPlayer);
+        }
+      } else {
+        // Nếu record chưa tồn tại, xác định shouldBeHost
+        const count = await this.roomPlayerRepository.count({
+          where: { roomId },
+        });
+        const shouldBeHost = isHostFlag || count === 0;
+        const newRoomPlayer = this.roomPlayerRepository.create({
+          roomId,
+          playerId,
+          isReady: false,
+          isHost: shouldBeHost,
+        });
+        await this.roomPlayerRepository.save(newRoomPlayer);
+      }
+    } catch (error) {
+      if (error?.code === '23505') return;
+      throw error;
+    }
+  }
+
+  async leaveRoom(roomId: string, playerId: string): Promise<void> {
+    await this.roomPlayerRepository.delete({ roomId, playerId });
   }
 
   async getGameState() {
     const players = await this.playerService.getPlayers();
     return {
-      isStarted: this.isGameStarted,
+      // Global state, không dùng nữa cho game per room
       players,
-      timeRemaining: this.timeRemaining,
+      timeRemaining: 0,
     };
   }
 }
