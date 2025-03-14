@@ -34,8 +34,7 @@ export class GameService {
     if (playersInRoom.length < 2) {
       throw new Error('Not enough players');
     }
-    // Sinh số ngẫu nhiên từ 1 đến 1000
-    const number = Math.floor(Math.random() * 1000) + 1;
+    const number = Math.floor(Math.random() * 100) + 1;
     const timeRemaining = 180;
     // Lưu trạng thái game cho room
     const gameState: RoomGameState = {

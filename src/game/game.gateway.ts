@@ -162,5 +162,73 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // Các event khác (resetScore, correctGuess, wrongGuess, game:finish) giữ nguyên...
-}
+  @SubscribeMessage('player:resetScore')
+  async handleResetScore(
+    client: Socket,
+    payload: { roomId: string; playerId: string },
+  ) {
+    try {
+      const updatedPlayer = await this.gameService['playerService'].resetScore(
+        payload.playerId,
+      );
+      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+      return { success: true, player: updatedPlayer };
+    } catch (error: any) {
+      console.error('Error resetting score:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  @SubscribeMessage('player:correctGuess')
+  async handleCorrectGuess(
+    client: Socket,
+    payload: { roomId: string; playerId: string; points: number },
+  ) {
+    try {
+      const updatedPlayer = await this.gameService['playerService'].updateScore(
+        payload.playerId,
+        payload.points,
+      );
+      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+      return { success: true, player: updatedPlayer };
+    } catch (error) {
+      console.error('Error updating score:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  @SubscribeMessage('player:wrongGuess')
+  async handleWrongGuess(
+    client: Socket,
+    payload: { roomId: string; playerId: string; points: number },
+  ) {
+    try {
+      const updatedPlayer = await this.gameService['playerService'].updateScore(
+        payload.playerId,
+        payload.points,
+      );
+      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+      return { success: true, player: updatedPlayer };
+    } catch (error: any) {
+      console.error('Error updating score for wrong guess:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  @SubscribeMessage('game:finish')
+  async handleGameFinish(
+    client: Socket,
+    payload: { roomId: string; playerId: string; finalScore: number },
+  ) {
+    try {
+      const updatedPlayer = await this.gameService['playerService'].updateScore(
+        payload.playerId,
+        0,
+      );
+      this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
+      return { success: true, player: updatedPlayer };
+    } catch (error: any) {
+      console.error('Error finishing game:', error);
+      return { success: false, error: error.message };
+    }
+  }}
