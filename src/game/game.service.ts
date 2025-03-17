@@ -57,7 +57,7 @@ export class GameService {
       gameTimer: null,
       availableNumbers,
     };
-    console.log("startGame state:", gameState);
+    // console.log("startGame state:", gameState);
     this.games.set(roomId, gameState);
     if (gameState.gameTimer) clearInterval(gameState.gameTimer);
     return { number, timeRemaining };
