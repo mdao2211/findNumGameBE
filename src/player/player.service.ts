@@ -47,7 +47,7 @@ export class PlayerService {
     if (!player) {
       throw new Error('Player not found');
     }
-    player.score = (player.score || 0) + score;
+    player.score = Math.max(0, (player.score || 0) + score);
     console.log(player.score);
     return this.playerRepository.save(player);
   }

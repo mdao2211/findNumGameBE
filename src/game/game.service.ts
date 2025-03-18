@@ -11,7 +11,7 @@ interface RoomGameState {
   isGameStarted: boolean;
   timeRemaining: number;
   gameTimer: NodeJS.Timeout | null;
-  availableNumbers: number[]; // Các số chưa được dùng
+  availableNumbers: number[];
 }
 
 @Injectable()
@@ -47,21 +47,33 @@ export class GameService {
     if (playersInRoom.length < 2) {
       throw new Error('Not enough players');
     }
+
+    for (const roomPlayer of playersInRoom) {
+      await this.playerService.resetScore(roomPlayer.playerId);
+    }
+
+    // Tạo mảng số từ 1 đến 100
     const availableNumbers = this.generateNumbers();
-    const number = availableNumbers.splice(Math.floor(Math.random() * availableNumbers.length), 1)[0];
+    // Số khởi đầu là 1
+    const initialNumber = 1;
+    // Nếu bạn muốn loại bỏ số 1 khỏi mảng availableNumbers (vì đã dùng)
+    const index = availableNumbers.indexOf(initialNumber);
+    if (index !== -1) {
+      availableNumbers.splice(index, 1);
+    }
     const timeRemaining = 180;
     const gameState: RoomGameState = {
-      currentNumber: number,
+      currentNumber: initialNumber,
       isGameStarted: true,
       timeRemaining,
       gameTimer: null,
       availableNumbers,
     };
-    // console.log("startGame state:", gameState);
     this.games.set(roomId, gameState);
     if (gameState.gameTimer) clearInterval(gameState.gameTimer);
-    return { number, timeRemaining };
+    return { number: initialNumber, timeRemaining };
   }
+  
 
   startTimer(roomId: string, callback: (time: number) => void, endCallback: () => void) {
     const gameState = this.games.get(roomId);

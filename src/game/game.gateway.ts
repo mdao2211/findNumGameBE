@@ -26,6 +26,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  private playerColors: Map<string, string> = new Map();
+
   constructor(
     private readonly gameService: GameService,
     private readonly roomService: RoomService,
@@ -182,7 +184,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('player:correctGuess')
   async handleCorrectGuess(
     client: Socket,
-    payload: { roomId: string; playerId: string; points: number },
+    payload: {
+      roomId: string;
+      playerId: string;
+      points: number;
+      guessedNumber: number;
+    },
   ) {
     try {
       // Cập nhật điểm cho người chơi
@@ -190,18 +197,43 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.playerId,
         payload.points,
       );
-      // Emit event cập nhật điểm cho toàn bộ room
+      // Phát event cập nhật điểm cho toàn bộ room
       this.server.to(payload.roomId).emit('score:updated', updatedPlayer);
 
-      // Tạo target number mới (trong khoảng 1-100)
-      const newTargetNumber = Math.floor(Math.random() * 100) + 1;
-      // Lấy trạng thái game của room
+      // Logic tăng dần target number
       const roomGameState = this.gameService.getRoomGameState(payload.roomId);
+      let newTargetNumber = 1; // nếu chưa có hoặc đạt 100 thì reset về 1
       if (roomGameState) {
+        if (
+          roomGameState.currentNumber === null ||
+          roomGameState.currentNumber >= 100
+        ) {
+          newTargetNumber = 1;
+        } else {
+          newTargetNumber = roomGameState.currentNumber + 1;
+        }
         roomGameState.currentNumber = newTargetNumber;
       }
-      // Emit event cập nhật target number mới cho toàn bộ room
+
+      // Phát event cập nhật số mục tiêu mới cho toàn room
       this.server.to(payload.roomId).emit('game:targetUpdate', newTargetNumber);
+
+      // Lấy màu của người chơi từ mapping, nếu chưa có thì sinh một màu ngẫu nhiên
+      let playerColor = this.playerColors.get(payload.playerId);
+      if (!playerColor) {
+        playerColor =
+          '#' +
+          Math.floor(Math.random() * 16777215)
+            .toString(16)
+            .padStart(6, '0');
+        this.playerColors.set(payload.playerId, playerColor);
+      }
+
+      // Phát event cho biết số được đoán đúng kèm theo màu của người chơi
+      this.server.to(payload.roomId).emit('game:numberCorrect', {
+        guessedNumber: payload.guessedNumber,
+        color: playerColor,
+      });
 
       return { success: true, player: updatedPlayer };
     } catch (error) {
