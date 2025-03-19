@@ -34,16 +34,24 @@ export class GameService {
     if (gameState.availableNumbers.length === 0) {
       return null;
     }
-    const randomIndex = Math.floor(Math.random() * gameState.availableNumbers.length);
+    const randomIndex = Math.floor(
+      Math.random() * gameState.availableNumbers.length,
+    );
     const number = gameState.availableNumbers[randomIndex];
     // Loại bỏ số đã chọn
     gameState.availableNumbers.splice(randomIndex, 1);
-    console.log(`Picked number: ${number}. Remaining: ${gameState.availableNumbers}`);
+    console.log(
+      `Picked number: ${number}. Remaining: ${gameState.availableNumbers}`,
+    );
     return number;
   }
 
-  async startGame(roomId: string): Promise<{ number: number; timeRemaining: number }> {
-    const playersInRoom = await this.roomPlayerRepository.find({ where: { roomId } });
+  async startGame(
+    roomId: string,
+  ): Promise<{ number: number; timeRemaining: number }> {
+    const playersInRoom = await this.roomPlayerRepository.find({
+      where: { roomId },
+    });
     if (playersInRoom.length < 2) {
       throw new Error('Not enough players');
     }
@@ -73,9 +81,12 @@ export class GameService {
     if (gameState.gameTimer) clearInterval(gameState.gameTimer);
     return { number: initialNumber, timeRemaining };
   }
-  
 
-  startTimer(roomId: string, callback: (time: number) => void, endCallback: () => void) {
+  startTimer(
+    roomId: string,
+    callback: (time: number) => void,
+    endCallback: () => void,
+  ) {
     const gameState = this.games.get(roomId);
     if (!gameState) return;
     if (gameState.gameTimer) clearInterval(gameState.gameTimer);
@@ -115,16 +126,24 @@ export class GameService {
     return this.games.get(roomId);
   }
 
-  async joinRoom(roomId: string, playerId: string, isHostFlag?: boolean): Promise<void> {
+  async joinRoom(
+    roomId: string,
+    playerId: string,
+    isHostFlag?: boolean,
+  ): Promise<void> {
     try {
-      const existingPlayer = await this.roomPlayerRepository.findOne({ where: { roomId, playerId } });
+      const existingPlayer = await this.roomPlayerRepository.findOne({
+        where: { roomId, playerId },
+      });
       if (existingPlayer) {
         if (isHostFlag && !existingPlayer.isHost) {
           existingPlayer.isHost = true;
           await this.roomPlayerRepository.save(existingPlayer);
         }
       } else {
-        const count = await this.roomPlayerRepository.count({ where: { roomId } });
+        const count = await this.roomPlayerRepository.count({
+          where: { roomId },
+        });
         const shouldBeHost = isHostFlag || count === 0;
         const newRoomPlayer = this.roomPlayerRepository.create({
           roomId,
@@ -156,11 +175,22 @@ export class GameService {
     if (!roomGameState) return null;
     const newTarget = this.pickNumber(roomGameState);
     if (newTarget === null) {
-      console.log("No available numbers left");
+      console.log('No available numbers left');
       return null;
     }
     roomGameState.currentNumber = newTarget;
     console.log(`New target number is ${newTarget}`);
     return newTarget;
+  }
+
+  // Thêm các phương thức hỗ trợ để ẩn truy vấn DB
+  async getRoomPlayer(roomId: string, playerId: string) {
+    return await this.roomPlayerRepository.findOne({
+      where: { roomId, playerId },
+    });
+  }
+
+  async countRoomPlayers(roomId: string): Promise<number> {
+    return await this.roomPlayerRepository.count({ where: { roomId } });
   }
 }

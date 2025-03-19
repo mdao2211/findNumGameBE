@@ -8,6 +8,7 @@ import { GameGateway } from './game/game.gateway';
 import { Player } from './player/entities/player.entity';
 import { RoomModule } from './room/room.module';
 import { GameModule } from './game/game.module';
+import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { GameModule } from './game/game.module';
     }),
     TypeOrmModule.forFeature([Player]),
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule, PlayerModule],
+      imports: [ConfigModule, PlayerModule, CacheModule.register()],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
         host: configService.get('DB_HOST'),
@@ -30,7 +31,7 @@ import { GameModule } from './game/game.module';
         ],
         ssl: {
           rejectUnauthorized: false,
-        }
+        },
         // synchronize: true,
       }),
       inject: [ConfigService],

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
-import { RoomService } from 'src/room/room.service';
+import { PlayerService } from 'src/player/player.service';
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
@@ -30,7 +30,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly gameService: GameService,
-    private readonly roomService: RoomService,
+    private readonly playerService: PlayerService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -56,26 +56,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       payload.isHost,
     );
 
-    // Lấy record RoomPlayer từ DB để xác định isHost
-    const roomPlayer = await this.gameService['roomPlayerRepository'].findOne({
-      where: { roomId: payload.roomId, playerId: payload.playerId },
-    });
-    const isHost = roomPlayer?.isHost ?? false;
-
-    const player = await this.gameService['playerService'].getPlayerById(
+    const roomPlayer = await this.gameService.getRoomPlayer(
+      payload.roomId,
       payload.playerId,
     );
+    const isHost = roomPlayer?.isHost ?? false;
+
+    const player = await this.playerService.getPlayerById(payload.playerId);
     const playerWithHost = { ...player, isHost };
+
     this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
 
-    const playersCount = await this.gameService['roomPlayerRepository'].count({
-      where: { roomId: payload.roomId },
-    });
+    const playersCount = await this.gameService.countRoomPlayers(
+      payload.roomId,
+    );
     this.server
       .to(payload.roomId)
       .emit('room:playerCountUpdated', { playersCount });
 
-    // Nếu game đã start, gửi trạng thái game cho client mới
     const roomGameState = this.gameService.getRoomGameState(payload.roomId);
     if (roomGameState && roomGameState.isGameStarted) {
       client.emit('game:started', {
