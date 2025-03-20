@@ -63,9 +63,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const isHost = roomPlayer?.isHost ?? false;
 
     const player = await this.playerService.getPlayerById(payload.playerId);
-    const playerWithHost = { ...player, isHost };
 
-    this.server.to(payload.roomId).emit('room:playerJoined', playerWithHost);
+    // Gán màu duy nhất cho người chơi nếu chưa có
+    let playerColor = this.playerColors.get(payload.playerId);
+    if (!playerColor) {
+      playerColor =
+        '#' +
+        Math.floor(Math.random() * 16777215)
+          .toString(16)
+          .padStart(6, '0');
+      this.playerColors.set(payload.playerId, playerColor);
+    }
+
+    const playerWithHostAndColor = { ...player, isHost, color: playerColor };
+
+    // Phát event cho tất cả trong room biết ai đã join
+    this.server
+      .to(payload.roomId)
+      .emit('room:playerJoined', playerWithHostAndColor);
 
     const playersCount = await this.gameService.countRoomPlayers(
       payload.roomId,
@@ -81,7 +96,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         timeRemaining: roomGameState.timeRemaining,
       });
     }
-    return { success: true, player: playerWithHost };
+    return { success: true, player: playerWithHostAndColor };
   }
 
   @SubscribeMessage('leaveRoom')
@@ -216,18 +231,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Phát event cập nhật số mục tiêu mới cho toàn room
       this.server.to(payload.roomId).emit('game:targetUpdate', newTargetNumber);
 
-      // Lấy màu của người chơi từ mapping, nếu chưa có thì sinh một màu ngẫu nhiên
-      let playerColor = this.playerColors.get(payload.playerId);
+      const playerColor = this.playerColors.get(payload.playerId);
       if (!playerColor) {
-        playerColor =
-          '#' +
-          Math.floor(Math.random() * 16777215)
-            .toString(16)
-            .padStart(6, '0');
-        this.playerColors.set(payload.playerId, playerColor);
+        // playerColor =
+        //   '#' +
+        //   Math.floor(Math.random() * 16777215)
+        //     .toString(16)
+        //     .padStart(6, '0');
+        // this.playerColors.set(payload.playerId, playerColor);
+
+        console.error(`Không tìm thấy màu của player ${payload.playerId}`);
       }
 
-      // Phát event cho biết số được đoán đúng kèm theo màu của người chơi
       this.server.to(payload.roomId).emit('game:numberCorrect', {
         guessedNumber: payload.guessedNumber,
         color: playerColor,
